@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Metrolist Receiver</title>
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --text-primary: rgba(255,255,255,0.95);
+      --text-secondary: rgba(255,255,255,0.45);
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #080808;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--text-primary);
+    }
+
+    /* Hide the default cast-media-player UI entirely */
+    cast-media-player {
+      display: none;
+    }
+
+    /* ── Background ── */
+    #bg-art {
+      position: fixed; inset: 0; z-index: 0;
+      background-size: cover;
+      background-position: center;
+      transform: scale(1.1);
+      opacity: 0;
+      transition: opacity 1s ease;
+    }
+    #bg-art.visible { opacity: 1; }
+
+    #bg-blur {
+      position: fixed; inset: 0; z-index: 1;
+      backdrop-filter: blur(90px) saturate(1.5) brightness(0.5);
+      -webkit-backdrop-filter: blur(90px) saturate(1.5) brightness(0.5);
+    }
+
+    #bg-vignette {
+      position: fixed; inset: 0; z-index: 2;
+      background:
+        radial-gradient(ellipse at center, transparent 20%, rgba(0,0,0,0.65) 100%),
+        linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 50%);
+    }
+
+    /* ── Screens ── */
+    .screen {
+      position: fixed; inset: 0; z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.7s ease;
+      display: flex;
+    }
+    .screen.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /* ── Now Playing ── */
+    #screen-playing {
+      align-items: flex-end;
+      padding: 8vh 8vw;
+    }
+
+    .playing-layout {
+      display: flex;
+      align-items: flex-end;
+      gap: 4.5vw;
+      width: 100%;
+    }
+
+    #album-art {
+      width: clamp(160px, 20vw, 320px);
+      aspect-ratio: 1 / 1;
+      border-radius: 10px;
+      object-fit: cover;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+      flex-shrink: 0;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    #album-art.visible { opacity: 1; transform: translateY(0); }
+
+    .track-info {
+      flex: 1;
+      min-width: 0;
+      padding-bottom: 4px;
+    }
+
+    #track-title {
+      font-family: 'DM Serif Display', serif;
+      font-size: clamp(1.8rem, 4vw, 4.8rem);
+      font-weight: 400;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      transform: translateX(-14px);
+      transition: opacity 0.55s ease 0.08s, transform 0.55s ease 0.08s;
+    }
+    #track-title.visible { opacity: 1; transform: translateX(0); }
+
+    #track-artist {
+      font-size: clamp(0.75rem, 1.4vw, 1.35rem);
+      font-weight: 300;
+      color: var(--text-secondary);
+      margin-top: 0.55em;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      transform: translateX(-14px);
+      transition: opacity 0.55s ease 0.16s, transform 0.55s ease 0.16s;
+    }
+    #track-artist.visible { opacity: 1; transform: translateX(0); }
+
+    /* Progress */
+    .progress-wrap {
+      margin-top: 2.2em;
+      opacity: 0;
+      transition: opacity 0.55s ease 0.24s;
+    }
+    .progress-wrap.visible { opacity: 1; }
+
+    #progress-track {
+      width: 100%;
+      height: 1.5px;
+      background: rgba(255,255,255,0.12);
+      border-radius: 2px;
+      position: relative;
+      overflow: hidden;
+    }
+    #progress-fill {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 0%;
+      background: rgba(255,255,255,0.85);
+      border-radius: 2px;
+      transition: width 1s linear;
+    }
+
+    .time-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 0.55em;
+      font-size: clamp(0.6rem, 0.9vw, 0.82rem);
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em;
+    }
+
+    /* Visualizer */
+    #visualizer {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 26px;
+      margin-top: 1.6em;
+      opacity: 0;
+      transition: opacity 0.55s ease 0.3s;
+    }
+    #visualizer.visible { opacity: 1; }
+
+    .bar {
+      width: 2.5px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.45);
+      transform-origin: bottom;
+      animation: pulse linear infinite alternate;
+    }
+    .bar.paused { animation-play-state: paused; }
+
+    @keyframes pulse {
+      from { transform: scaleY(0.12); }
+      to   { transform: scaleY(1); }
+    }
+
+    /* ── Idle / Clock ── */
+    #screen-idle {
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    #idle-clock {
+      font-family: 'DM Serif Display', serif;
+      font-size: clamp(5rem, 15vw, 14rem);
+      font-weight: 400;
+      color: rgba(255,255,255,0.9);
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    #idle-date {
+      font-size: clamp(0.85rem, 1.4vw, 1.25rem);
+      font-weight: 300;
+      color: var(--text-secondary);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    #idle-hint {
+      margin-top: 3.5rem;
+      font-size: clamp(0.6rem, 0.85vw, 0.78rem);
+      color: rgba(255,255,255,0.18);
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+    }
+
+    /* ── Loading ── */
+    #screen-loading {
+      align-items: center;
+      justify-content: center;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 1.5px solid rgba(255,255,255,0.12);
+      border-top-color: rgba(255,255,255,0.65);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <!-- Required by Cast SDK -->
+  <cast-media-player></cast-media-player>
+
+  <!-- Backgrounds -->
+  <div id="bg-art"></div>
+  <div id="bg-blur"></div>
+  <div id="bg-vignette"></div>
+
+  <!-- Loading screen -->
+  <div class="screen active" id="screen-loading">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Now Playing screen -->
+  <div class="screen" id="screen-playing">
+    <div class="playing-layout">
+      <img id="album-art" src="" alt="" />
+      <div class="track-info">
+        <div id="track-title">—</div>
+        <div id="track-artist">—</div>
+        <div class="progress-wrap" id="progress-wrap">
+          <div id="progress-track">
+            <div id="progress-fill"></div>
+          </div>
+          <div class="time-row">
+            <span id="time-current">0:00</span>
+            <span id="time-total">0:00</span>
+          </div>
+        </div>
+        <div id="visualizer"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Idle / Clock screen -->
+  <div class="screen" id="screen-idle">
+    <div id="idle-clock">00:00</div>
+    <div id="idle-date"></div>
+    <div id="idle-hint">Metrolist</div>
+  </div>
+
+  <script>
+  (() => {
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const player  = context.getPlayerManager();
+
+    // ── DOM ──
+    const bgArt       = document.getElementById('bg-art');
+    const albumArt    = document.getElementById('album-art');
+    const trackTitle  = document.getElementById('track-title');
+    const trackArtist = document.getElementById('track-artist');
+    const progFill    = document.getElementById('progress-fill');
+    const timeCurrent = document.getElementById('time-current');
+    const timeTotal   = document.getElementById('time-total');
+    const progWrap    = document.getElementById('progress-wrap');
+    const visualizer  = document.getElementById('visualizer');
+    const idleClock   = document.getElementById('idle-clock');
+    const idleDate    = document.getElementById('idle-date');
+
+    const screens = {
+      loading: document.getElementById('screen-loading'),
+      playing: document.getElementById('screen-playing'),
+      idle:    document.getElementById('screen-idle'),
+    };
+
+    // ── Build visualizer bars ──
+    for (let i = 0; i < 22; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      const dur   = (0.35 + Math.random() * 0.65).toFixed(2);
+      const delay = -(Math.random() * 0.6).toFixed(2);
+      const maxH  = 10 + Math.floor(Math.random() * 16);
+      bar.style.cssText = `height:${maxH}px; animation-duration:${dur}s; animation-delay:${delay}s;`;
+      visualizer.appendChild(bar);
+    }
+
+    // ── Screen switcher ──
+    function show(name) {
+      Object.entries(screens).forEach(([k, el]) =>
+        el.classList.toggle('active', k === name)
+      );
+    }
+
+    // ── Format seconds → m:ss ──
+    function fmt(s) {
+      if (!s || isNaN(s) || s < 0) return '0:00';
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60).toString().padStart(2, '0');
+      return `${m}:${sec}`;
+    }
+
+    // ── Animate track info in/out ──
+    const animEls = [albumArt, trackTitle, trackArtist, progWrap, visualizer];
+    function animOut(cb) {
+      animEls.forEach(el => el.classList.remove('visible'));
+      setTimeout(cb, 380);
+    }
+    function animIn() {
+      animEls.forEach(el => el.classList.add('visible'));
+    }
+
+    // ── Background crossfade ──
+    let lastBg = '';
+    function setBg(url) {
+      if (!url || url === lastBg) return;
+      lastBg = url;
+      bgArt.classList.remove('visible');
+      setTimeout(() => {
+        bgArt.style.backgroundImage = `url('${encodeURI(url)}')`;
+        bgArt.classList.add('visible');
+      }, 350);
+    }
+
+    // ── Update track metadata ──
+    let lastTrackId = '';
+    function updateTrack(media) {
+      if (!media) return;
+      const meta    = media.metadata || {};
+      const title   = meta.title   || meta.subtitle || 'Unknown Track';
+      const artist  = meta.artist  || meta.albumArtist || '';
+      const images  = meta.images  || [];
+      const imgUrl  = images[0]?.url || '';
+      const trackId = title + artist;
+
+      if (trackId === lastTrackId) return;
+      lastTrackId = trackId;
+
+      animOut(() => {
+        trackTitle.textContent  = title;
+        trackArtist.textContent = artist;
+        timeTotal.textContent   = fmt(media.duration);
+
+        if (imgUrl) {
+          albumArt.src = imgUrl;
+          setBg(imgUrl);
+        }
+
+        animIn();
+        show('playing');
+      });
+    }
+
+    // ── Progress ticker ──
+    let ticker = null;
+    function startTicker() {
+      if (ticker) return;
+      ticker = setInterval(() => {
+        const PS = cast.framework.messages.PlayerState;
+        if (player.getPlayerState() !== PS.PLAYING) return;
+        const cur = player.getCurrentTimeSec();
+        const dur = player.getDurationSec();
+        if (dur > 0) {
+          progFill.style.width = ((cur / dur) * 100).toFixed(3) + '%';
+          timeCurrent.textContent = fmt(cur);
+        }
+      }, 1000);
+    }
+    function stopTicker() {
+      clearInterval(ticker);
+      ticker = null;
+    }
+
+    // ── Clock ──
+    function tickClock() {
+      const now = new Date();
+      const h = now.getHours().toString().padStart(2, '0');
+      const m = now.getMinutes().toString().padStart(2, '0');
+      idleClock.textContent = `${h}:${m}`;
+      idleDate.textContent  = now.toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric'
+      });
+    }
+    tickClock();
+    setInterval(tickClock, 15000);
+
+    // ── Player events ──
+    const ET = cast.framework.events.EventType;
+    const PS = cast.framework.messages.PlayerState;
+
+    player.addEventListener(ET.MEDIA_STATUS, () => {
+      const media = player.getMediaInformation();
+      if (media) updateTrack(media);
+    });
+
+    player.addEventListener(ET.PLAYER_STATE, (e) => {
+      const state = e.state;
+      const bars  = visualizer.querySelectorAll('.bar');
+
+      if (state === PS.PLAYING) {
+        bars.forEach(b => b.classList.remove('paused'));
+        startTicker();
+        show('playing');
+      } else if (state === PS.PAUSED) {
+        bars.forEach(b => b.classList.add('paused'));
+        stopTicker();
+      } else if (state === PS.IDLE) {
+        stopTicker();
+        lastTrackId = '';
+        setTimeout(() => show('idle'), 1000);
+      } else if (state === PS.BUFFERING) {
+        show('loading');
+      }
+    });
+
+    // ── Ready ──
+    context.addEventListener(cast.framework.system.EventType.READY, () => {
+      show('idle');
+    });
+
+    // ── Start ──
+    context.start();
+  })();
+  </script>
+</body>
+</html>
